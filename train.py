@@ -4,6 +4,7 @@ import json
 import os
 import yaml
 from tqdm import trange
+import numpy as np
 
 import maml_rl.envs
 from maml_rl.metalearners import MAMLTRPO
@@ -11,17 +12,26 @@ from maml_rl.baseline import LinearFeatureBaseline
 from maml_rl.samplers import MultiTaskSampler
 from maml_rl.utils.helpers import get_policy_for_env, get_input_size
 from maml_rl.utils.reinforcement_learning import get_returns
+from torch.utils.tensorboard import SummaryWriter
 
 
 def main(args):
+
+    log_dir = "log"
+    save_dir = "save"
     with open(args.config, 'r') as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
 
     if args.output_folder is not None:
-        if not os.path.exists(args.output_folder):
-            os.makedirs(args.output_folder)
-        policy_filename = os.path.join(args.output_folder, 'policy.th')
-        config_filename = os.path.join(args.output_folder, 'config.json')
+        log_dir = os.path.join(log_dir,args.output_folder)
+        save_dir = os.path.join(save_dir,args.output_folder)
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        policy_filename = os.path.join(save_dir, 'policy.th')
+        config_filename = os.path.join(save_dir, 'config.json')
 
         with open(config_filename, 'w') as f:
             config.update(vars(args))
@@ -30,6 +40,8 @@ def main(args):
     if args.seed is not None:
         torch.manual_seed(args.seed)
         torch.cuda.manual_seed_all(args.seed)
+
+    writer = SummaryWriter(log_dir)
 
     env = gym.make(config['env-name'], **config['env-kwargs'])
     env.close()
@@ -77,10 +89,17 @@ def main(args):
         train_episodes, valid_episodes = sampler.sample_wait(futures)
         num_iterations += sum(sum(episode.lengths) for episode in train_episodes[0])
         num_iterations += sum(sum(episode.lengths) for episode in valid_episodes)
-        logs.update(tasks=tasks,
-                    num_iterations=num_iterations,
-                    train_returns=get_returns(train_episodes[0]),
+        # logs.update(tasks=tasks,
+        #             num_iterations=num_iterations,
+        #             train_returns=get_returns(train_episodes[0]),
+        #             valid_returns=get_returns(valid_episodes))
+
+        logs.update(train_returns=get_returns(train_episodes[0]),
                     valid_returns=get_returns(valid_episodes))
+
+        # log tensorboard
+        for key in logs.keys():
+            writer.add_scalar(key,np.mean(logs[key]),batch)
 
         # Save policy
         if args.output_folder is not None:
