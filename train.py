@@ -15,6 +15,95 @@ from maml_rl.utils.reinforcement_learning import get_returns
 from torch.utils.tensorboard import SummaryWriter
 
 
+class PriorTaskBuffer:
+    def __init__(self, size = 100):
+        self.size = size
+        self.losses = np.zeros(self.size) -1000
+        self.task_buffer = np.array([dict() for i in range(self.size)])
+
+
+    def select_most_difficult_task(self,losses, tasks, n = 10):
+        '''
+        Select n most difficult tasks form losses and corresponding tasks
+
+        :param losses:  list of losses
+        :param tasks: list of tasks
+        :param n: number of task
+        :return: selected task
+        '''
+        ind = np.argpartition(losses, -n)[-n:]
+
+        sel_loss=  losses[ind]
+        sel_task = tasks[ind]
+
+        return  sel_loss , sel_task
+
+
+    def add_task(self,losses,tasks):
+        '''
+        Replace the lowest validation lost task by new tasks
+        :return:
+        '''
+        n = len(tasks)
+        if n > self.size:
+            raise Exception("Over buffer size")
+
+        # get *n* index of lowest loss
+        ind = np.argpartition(self.losses, n)[:n]
+
+        for i, loss , task in zip(ind,losses,tasks):
+            self.losses[i] = loss
+            self.task_buffer[i] = task
+
+
+    def sample_max_dif(self,n = 10):
+        '''
+        Sample the highest difficult tasks in the buffer. The task which was sampled will be removed from the buffer
+        :param n:  number of sampled tasks
+        :return: list of task
+        '''
+
+        if n > self.get_current_size():
+            raise Exception("The buffer doesnot have enough tasks to sample")
+
+        # get *n* index of higher loss elements in buffer
+        ind = np.argpartition(self.losses, -n)[-n:]
+        ret = self.task_buffer[ind]
+        self.task_buffer[ind] = dict()
+        self.losses[ind] = -1000
+        return  ret
+
+
+    def get_current_size(self):
+        return sum(self.task_buffer != 0 )
+
+
+    def sample_dis(self,n = 10):
+        '''
+        Sample tasks with probability according to the difficulty. The task which was sampled will be removed from the buffer
+        :param size: number of sampled tasks
+        :return: list of task
+        '''
+
+        if n > self.get_current_size():
+            raise Exception("The buffer doesnot have enough tasks to sample")
+
+        def softmax(x):
+            """Compute softmax values for each sets of scores in x."""
+            e_x = np.exp(x - np.max(x))
+            return e_x / e_x.sum()
+        ind = np.random.choice(self.size, n, replace=False, p=softmax(self.losses))
+
+        ret = self.task_buffer[ind]
+        self.task_buffer[ind] = dict()
+        self.losses[ind] = -1000
+        return ret
+
+    def reset(self):
+        self.losses = np.zeros(self.size)
+        self.task_buffer = np.zeros(self.size)
+
+
 def main(args):
 
     log_dir = "log"
@@ -71,8 +160,20 @@ def main(args):
                            device=args.device)
 
     num_iterations = 0
+
+
+    first_train = True
+    num_prior = 10
+    buffer = PriorTaskBuffer(size=100)
+
     for batch in trange(config['num-batches']):
-        tasks = sampler.sample_tasks(num_tasks=config['meta-batch-size'])
+        if first_train:
+            tasks = sampler.sample_tasks(num_tasks=config['meta-batch-size'])
+            first_train = False
+        else:
+            tasks =  sampler.sample_tasks(num_tasks=config['meta-batch-size'] - num_prior)
+            tasks.extend(buffer.sample_max_dif(num_prior).tolist())
+
         futures = sampler.sample_async(tasks,
                                        num_steps=config['num-steps'],
                                        fast_lr=config['fast-lr'],
@@ -96,6 +197,16 @@ def main(args):
 
         logs.update(train_returns=get_returns(train_episodes[0]),
                     valid_returns=get_returns(valid_episodes))
+
+
+        # Update prioritize buffer
+
+        loss_after = np.squeeze(np.array(logs['loss_after']))
+        cor_tasks = np.array(tasks)
+
+        sel_losses, sel_tasks = buffer.select_most_difficult_task(loss_after,cor_tasks,num_prior)
+        buffer.add_task(sel_losses,sel_tasks)
+
 
         # log tensorboard
         for key in logs.keys():
