@@ -18,7 +18,7 @@ from torch.utils.tensorboard import SummaryWriter
 class PriorTaskBuffer:
     def __init__(self, size = 100):
         self.size = size
-        self.losses = np.zeros(self.size) -1000
+        self.losses = np.zeros(self.size)
         self.task_buffer = np.array([dict() for i in range(self.size)])
 
 
@@ -200,11 +200,15 @@ def main(args):
 
 
         # Update prioritize buffer
+        use_loss = False
+        if use_loss:
+            valid_return = np.squeeze(np.array(logs['loss_after']))
+        else:
+            valid_return = - np.squeeze(np.mean(np.array(logs['valid_returns']), axis=1))
 
-        loss_after = np.squeeze(np.array(logs['loss_after']))
         cor_tasks = np.array(tasks)
 
-        sel_losses, sel_tasks = buffer.select_most_difficult_task(loss_after,cor_tasks,num_prior)
+        sel_losses, sel_tasks = buffer.select_most_difficult_task(valid_return,cor_tasks,num_prior)
         buffer.add_task(sel_losses,sel_tasks)
 
 
