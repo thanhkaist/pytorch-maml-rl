@@ -9,10 +9,34 @@ from maml_rl.baseline import LinearFeatureBaseline
 from maml_rl.samplers import MultiTaskSampler
 from maml_rl.utils.helpers import get_policy_for_env, get_input_size
 from maml_rl.utils.reinforcement_learning import get_returns
+from torch.utils.tensorboard import SummaryWriter
 
 
 def main(args):
-    with open(args.config, 'r') as f:
+
+    log_dir = "log"
+    save_dir = "save"
+
+    if args.input is not None:
+        log_dir = os.path.join(log_dir,args.input)
+        save_dir = os.path.join(save_dir,args.input)
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+    policy_filename = os.path.join(save_dir, 'policy.th')
+    config_filename = os.path.join(save_dir, 'config.json')
+    result_file = os.path.join(save_dir,'results.npz')
+
+    if args.seed is not None:
+        torch.manual_seed(args.seed)
+        torch.cuda.manual_seed_all(args.seed)
+
+    writer = SummaryWriter(log_dir)
+
+
+    with open(config_filename, 'r') as f:
         config = json.load(f)
 
     if args.seed is not None:
@@ -26,7 +50,7 @@ def main(args):
     policy = get_policy_for_env(env,
                                 hidden_sizes=config['hidden-sizes'],
                                 nonlinearity=config['nonlinearity'])
-    with open(args.policy, 'rb') as f:
+    with open(policy_filename, 'rb') as f:
         state_dict = torch.load(f, map_location=torch.device(args.device))
         policy.load_state_dict(state_dict)
     policy.share_memory()
@@ -59,11 +83,16 @@ def main(args):
         train_returns.append(get_returns(train_episodes[0]))
         valid_returns.append(get_returns(valid_episodes))
 
+        writer.add_scalar('avg_train_returns', np.mean(get_returns(train_episodes[0])),batch)
+        writer.add_scalar('avg_test_returns', np.mean(get_returns(valid_episodes)),batch)
+
+
+
     logs['train_returns'] = np.concatenate(train_returns, axis=0)
     logs['valid_returns'] = np.concatenate(valid_returns, axis=0)
 
-    with open(args.output, 'wb') as f:
-        np.savez(f, **logs)
+    with open(result_file, 'wb') as f:
+         np.savez(f, **logs)
 
 
 if __name__ == '__main__':
@@ -74,10 +103,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Reinforcement learning with '
         'Model-Agnostic Meta-Learning (MAML) - Test')
 
-    parser.add_argument('--config', type=str, required=True,
-        help='path to the configuration file')
-    parser.add_argument('--policy', type=str, required=True,
-        help='path to the policy checkpoint')
+    #parser.add_argument('--config', type=str, required=True,
+    #    help='path to the configuration file')
+    # parser.add_argument('--policy', type=str, required=True,
+    #     help='path to the policy checkpoint')
 
     # Evaluation
     evaluation = parser.add_argument_group('Evaluation')
@@ -88,8 +117,8 @@ if __name__ == '__main__':
 
     # Miscellaneous
     misc = parser.add_argument_group('Miscellaneous')
-    misc.add_argument('--output', type=str, required=True,
-        help='name of the output folder (default: maml)')
+    misc.add_argument('--input', type=str, required=True,
+        help='name of the input folder (default: maml)')
     misc.add_argument('--seed', type=int, default=1,
         help='random seed (default: 1)')
     misc.add_argument('--num-workers', type=int, default=mp.cpu_count() - 1,
