@@ -13,6 +13,7 @@ from maml_rl.samplers import MultiTaskSampler
 from maml_rl.utils.helpers import get_policy_for_env, get_input_size
 from maml_rl.utils.reinforcement_learning import get_returns
 from torch.utils.tensorboard import SummaryWriter
+import torch.nn as nn
 
 
 class PriorTaskBuffer:
@@ -105,9 +106,11 @@ class PriorTaskBuffer:
 
 
 def main(args):
-
+    print(args)
     log_dir = "log"
     save_dir = "save"
+
+
     with open(args.config, 'r') as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
 
@@ -139,6 +142,7 @@ def main(args):
     policy = get_policy_for_env(env,
                                 hidden_sizes=config['hidden-sizes'],
                                 nonlinearity=config['nonlinearity'])
+    policy.set_learning_rate(config['fast-lr']) #config['fast-lr']
     policy.share_memory()
 
     # Baseline
@@ -161,22 +165,25 @@ def main(args):
 
     num_iterations = 0
 
-
+    # Prioritize task
     first_train = True
-    num_prior = 10
+    num_prior = args.num_prior
     buffer = PriorTaskBuffer(size=100)
+    # Adaptive learning rate
+    policy.adapt_alpha = args.adapt_lr
 
     for batch in trange(config['num-batches']):
-        if first_train:
+        if first_train or (num_prior == 0):
             tasks = sampler.sample_tasks(num_tasks=config['meta-batch-size'])
             first_train = False
         else:
+
             tasks =  sampler.sample_tasks(num_tasks=config['meta-batch-size'] - num_prior)
             tasks.extend(buffer.sample_max_dif(num_prior).tolist())
 
         futures = sampler.sample_async(tasks,
                                        num_steps=config['num-steps'],
-                                       fast_lr=config['fast-lr'],
+                                       fast_lr=policy.alpha.item(),                                 ## config['fast-lr']
                                        gamma=config['gamma'],
                                        gae_lambda=config['gae-lambda'],
                                        device=args.device)
@@ -198,13 +205,12 @@ def main(args):
         logs.update(train_returns=get_returns(train_episodes[0]),
                     valid_returns=get_returns(valid_episodes))
 
-
         # Update prioritize buffer
         use_loss = False
         if use_loss:
-            valid_return = np.squeeze(np.array(logs['loss_after']))
+            valid_return = np.squeeze(np.array(logs['loss_after'])) # use loss for prioritize task, higher loss=> more difficult task
         else:
-            valid_return = - np.squeeze(np.mean(np.array(logs['valid_returns']), axis=1))
+            valid_return = - np.squeeze(np.mean(np.array(logs['valid_returns']), axis=1)) # use return for prioritize task, low return => more difficult task
 
         cor_tasks = np.array(tasks)
 
@@ -232,6 +238,10 @@ if __name__ == '__main__':
     parser.add_argument('--config', type=str, required=True,
         help='path to the configuration file.')
 
+    parser.add_argument('--adapt_lr', action='store_true', help='adapt learning rate')
+
+    parser.add_argument('--num_prior', type=int, default=0,
+                      help='random seed')
     # Miscellaneous
     misc = parser.add_argument_group('Miscellaneous')
     misc.add_argument('--output-folder', type=str,

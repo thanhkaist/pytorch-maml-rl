@@ -18,6 +18,20 @@ class Policy(nn.Module):
         self.named_meta_parameters = self.named_parameters
         self.meta_parameters = self.parameters
 
+        # Adaptive learning rate
+        self.adapt_alpha = True
+        if self.adapt_alpha:
+            self.alpha_max = 1
+            self.alpha_min = 1e-6
+            self.alpha = nn.Parameter(torch.tensor(1e-3, requires_grad=True))
+
+    def set_learning_rate(self,lr=1e-3):
+        if lr > self.alpha_max:
+            lr = self.alpha_max
+        if lr < self.alpha_min:
+            lr = self.alpha_min
+        self.alpha.data.copy_(torch.tensor(lr,dtype=torch.float32))
+
     def update_params(self, loss, params=None, step_size=0.5, first_order=False):
         """Apply one step of gradient descent on the loss function `loss`, with 
         step-size `step_size`, and returns the updated parameters of the neural 
@@ -25,6 +39,7 @@ class Policy(nn.Module):
         """
         if params is None:
             params = OrderedDict(self.named_meta_parameters())
+            params.pop('alpha',None)
 
         grads = torch.autograd.grad(loss, params.values(),
                                     create_graph=not first_order)

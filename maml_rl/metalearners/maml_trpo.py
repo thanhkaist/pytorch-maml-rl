@@ -55,8 +55,9 @@ class MAMLTRPO(GradientBasedMetaLearner):
         super(MAMLTRPO, self).__init__(policy, device=device)
         self.fast_lr = fast_lr
         self.first_order = first_order
+        self.hyper_alpha_lr = fast_lr
 
-    async def adapt(self, train_futures, first_order=None):
+    async def adapt(self, train_futures, first_order=None,alpha=None):
         if first_order is None:
             first_order = self.first_order
         # Loop over the number of steps of adaptation
@@ -65,33 +66,40 @@ class MAMLTRPO(GradientBasedMetaLearner):
             inner_loss = reinforce_loss(self.policy,
                                         await futures,
                                         params=params)
-            params = self.policy.update_params(inner_loss,
+            if alpha is None:
+                params = self.policy.update_params(inner_loss,
                                                params=params,
                                                step_size=self.fast_lr,
+                                               first_order=first_order)
+            else:
+                params = self.policy.update_params(inner_loss,
+                                               params=params,
+                                               step_size=alpha,
                                                first_order=first_order)
         return params
 
     def hessian_vector_product(self, kl, damping=1e-2):
+        net_params = list(self.policy.parameters())
+        net_params.pop(0) # remove learning rate
         grads = torch.autograd.grad(kl,
-                                    self.policy.parameters(),
+                                    net_params,
                                     create_graph=True)
         flat_grad_kl = parameters_to_vector(grads)
 
         def _product(vector, retain_graph=True):
             grad_kl_v = torch.dot(flat_grad_kl, vector)
             grad2s = torch.autograd.grad(grad_kl_v,
-                                         self.policy.parameters(),
+                                         net_params,
                                          retain_graph=retain_graph)
             flat_grad2_kl = parameters_to_vector(grad2s)
 
             return flat_grad2_kl + damping * vector
         return _product
 
-    async def surrogate_loss(self, train_futures, valid_futures, old_pi=None):
+    async def surrogate_loss(self, train_futures, valid_futures, old_pi=None,alpha = None):
         first_order = (old_pi is not None) or self.first_order
         params = await self.adapt(train_futures,
-                                  first_order=first_order)
-
+                                  first_order=first_order,alpha = alpha)
         with torch.set_grad_enabled(old_pi is None):
             valid_episodes = await valid_futures
             pi = self.policy(valid_episodes.observations, params=params)
@@ -120,19 +128,29 @@ class MAMLTRPO(GradientBasedMetaLearner):
              ls_backtrack_ratio=0.5):
         num_tasks = len(train_futures[0])
         logs = {}
-
+        # Set fast_lr
+        if self.policy.adapt_alpha:
+            self.fast_lr = self.policy.alpha.item()
         # Compute the surrogate loss
         old_losses, old_kls, old_pis = self._async_gather([
-            self.surrogate_loss(train, valid, old_pi=None)
+            self.surrogate_loss(train, valid, old_pi=None,alpha = self.policy.alpha)
             for (train, valid) in zip(zip(*train_futures), valid_futures)])
 
         logs['loss_before'] = to_numpy(old_losses)
         logs['kl_before'] = to_numpy(old_kls)
 
         old_loss = sum(old_losses) / num_tasks
+
+        net_params = list(self.policy.parameters())
+        alpha_param = net_params.pop(0)
+
         grads = torch.autograd.grad(old_loss,
-                                    self.policy.parameters(),
+                                    net_params,
                                     retain_graph=True)
+        if self.policy.adapt_alpha:
+            alpha_grad = torch.autograd.grad(old_loss,alpha_param,retain_graph=True)
+            self.policy.set_learning_rate(self.fast_lr - self.hyper_alpha_lr*alpha_grad[0].item())
+        logs['learning_rate']  = to_numpy(self.policy.alpha)
         grads = parameters_to_vector(grads)
 
         # Compute the step direction with Conjugate Gradient
@@ -151,13 +169,13 @@ class MAMLTRPO(GradientBasedMetaLearner):
         step = stepdir / lagrange_multiplier
 
         # Save the old parameters
-        old_params = parameters_to_vector(self.policy.parameters())
+        old_params = parameters_to_vector(net_params) # self.policy.parameters()
 
         # Line search
         step_size = 1.0
         for _ in range(ls_max_steps):
             vector_to_parameters(old_params - step_size * step,
-                                 self.policy.parameters())
+                                 net_params) # self.policy.parameters()
 
             losses, kls, _ = self._async_gather([
                 self.surrogate_loss(train, valid, old_pi=old_pi)
@@ -172,6 +190,6 @@ class MAMLTRPO(GradientBasedMetaLearner):
                 break
             step_size *= ls_backtrack_ratio
         else:
-            vector_to_parameters(old_params, self.policy.parameters())
+            vector_to_parameters(old_params, net_params) # self.policy.parameters()
 
         return logs
