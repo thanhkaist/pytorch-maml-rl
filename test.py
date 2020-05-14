@@ -74,7 +74,7 @@ def main(args):
         tasks = sampler.sample_tasks(num_tasks=args.meta_batch_size)
         train_episodes, valid_episodes = sampler.sample(tasks,
                                                         num_steps=config['num-steps'],
-                                                        fast_lr=config['fast-lr'],
+                                                        fast_lr=policy.alpha,
                                                         gamma=config['gamma'],
                                                         gae_lambda=config['gae-lambda'],
                                                         device=args.device)
