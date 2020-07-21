@@ -34,7 +34,7 @@ fast-batch-size: 20
 num-steps: 1
 
 # Step size for each gradient step in the inner loop / fast adaptation.
-fast-lr: 0.1
+fast-lr: 0.01
 
 # Optimization
 # ------------
@@ -42,7 +42,7 @@ fast-lr: 0.1
 num-batches: 500
 
 # Number of tasks in each batch of tasks.
-meta-batch-size: 20
+meta-batch-size: 40
 
 # TRPO-specific
 # -------------

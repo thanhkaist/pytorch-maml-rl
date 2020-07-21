@@ -19,7 +19,7 @@ import torch.nn as nn
 class PriorTaskBuffer:
     def __init__(self, size = 100):
         self.size = size
-        self.losses = np.zeros(self.size)
+        self.losses = np.zeros(self.size) - 1000
         self.task_buffer = np.array([dict() for i in range(self.size)])
 
 
