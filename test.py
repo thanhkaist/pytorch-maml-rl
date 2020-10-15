@@ -90,7 +90,7 @@ def main(args):
 
     logs['train_returns'] = np.concatenate(train_returns, axis=0)
     logs['valid_returns'] = np.concatenate(valid_returns, axis=0)
-
+    writer.close()
     with open(result_file, 'wb') as f:
          np.savez(f, **logs)
 
