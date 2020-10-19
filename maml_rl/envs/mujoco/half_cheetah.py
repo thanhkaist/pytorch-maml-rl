@@ -48,15 +48,14 @@ class HalfCheetahVelEnv(HalfCheetahEnv):
         model-based control", 2012 
         (https://homes.cs.washington.edu/~todorov/papers/TodorovIROS12.pdf)
     """
-    def __init__(self, task={}, low=0.0, high=2.0,train = True):
+    def __init__(self, task={}, low=0.0, high=2.0, noise_ratio = 0.2,train = True):
         self._task = task
         self.low = low
         self.high = high
         self.train = train
-        self.noise_low = 4.0
-        self.noise_high = 5.0
-        self.noise_ratio = 0.2
-        
+        self.noise_low = 3.0
+        self.noise_high = 4.0
+        self.noise_ratio = noise_ratio
         self._goal_vel = task.get('velocity', 0.0)
         super(HalfCheetahVelEnv, self).__init__()
 

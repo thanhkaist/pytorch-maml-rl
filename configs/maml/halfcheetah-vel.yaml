@@ -7,6 +7,7 @@ env-name: "HalfCheetahVel-v2"
 env-kwargs:
   low: 0.0
   high: 2.0
+  noise_ratio: 0.2
   normalization_scale: 10.0
   max_episode_steps: 100
 
@@ -22,7 +23,7 @@ first-order: false
 # Policy network
 # --------------
 # Number of hidden units in each layer.
-hidden-sizes: [64, 64]
+hidden-sizes: [512, 128]
 
 # Non-linear activation function to apply after each hidden layer.
 nonlinearity: "tanh"
@@ -30,13 +31,13 @@ nonlinearity: "tanh"
 # Task-specific
 # -------------
 # Number of trajectories to sample for each task.
-fast-batch-size: 20
+fast-batch-size: 40
 
 # Number of gradient steps in the inner loop / fast adaptation.
 num-steps: 1
 
 # Step size for each gradient step in the inner loop / fast adaptation.
-fast-lr: 0.01
+fast-lr: 0.001
 
 # Optimization
 # ------------
